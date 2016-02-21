@@ -4,14 +4,20 @@
 package analyzer;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
 import json.JSONArray;
 import json.JSONException;
 import json.JSONObject;
@@ -55,7 +61,7 @@ public class DocAnalyzer {
 		m_N = N;
 		m_stopwords = new HashSet<String>();
 		m_reviews = new ArrayList<Post>();
-    m_stats = new HashMap<String, Token>();
+		m_stats = new HashMap<String, Token>();
 		m_tokenizer = new TokenizerME(new TokenizerModel(new FileInputStream(tokenModel)));
 	}
 
@@ -95,18 +101,44 @@ public class DocAnalyzer {
 				 * The Post class has defined a "HashMap<String, Token> m_vector" field to hold the vector representation
 				 * For efficiency purpose, you can accumulate a term's DF here as well
 				 */
-				for (String token: m_tokenizer.tokenize(review.getContent())) {
-				  String s = SnowballStemming(Normalization(token));
-				  if (!s.isEmpty()) {
-				    if (m_stats.containsKey(s)) {
-				      m_stats.get(s).setValue(m_stats.get(s).getValue() + 1);
-				    } else {
-				      Token t = new Token(s);
-				      t.setValue(1);
-				      m_stats.put(s, t);
-				    }
-				  }
-				}
+				// Maintain a N-word history for constructing N-gram
+		    List<String> n_history = new LinkedList<String>();
+		    for (int j = 0; j < m_N - 1; j++) {
+		      n_history.add("");
+		    }
+		    for (String token : tokens) {
+		      // Normalization and Stemming
+		      String s = SnowballStemming(Normalization(token));
+		      String n_gram = "";
+
+		      // N-gram construction and stopword removing
+          if (m_stopwords.contains(s)) s = "";
+		      if (!s.isEmpty()) {
+		        boolean skip = false;
+		        for (int j = 0; j < n_history.size(); j++) {
+		          if (n_history.get(j).isEmpty()) {
+		            n_gram = "";
+		            skip = true;
+		            break;
+		          }
+		          n_gram += n_history.get(j) + "_";
+		        }
+		        if (!skip) n_gram += s;
+		      }
+
+		      // Statistics
+		      if (!n_gram.isEmpty()) {
+            if (m_stats.containsKey(n_gram)) {
+              m_stats.get(n_gram).setValue(m_stats.get(n_gram).getValue() + 1);
+            } else {
+              Token t = new Token(n_gram);
+              t.setValue(1);
+              m_stats.put(n_gram, t);
+            }
+          }
+		      n_history.add(s);
+		      n_history.remove(0);
+		    }
 
 				m_reviews.add(review);
 			}
@@ -164,6 +196,7 @@ public class DocAnalyzer {
 		}
 		size = m_reviews.size() - size;
 		System.out.println("Loading " + size + " review documents from " + folder);
+		System.out.println("Loading " + m_stats.size() + " tokens");
 	}
 
 	//sample code for demonstrating how to use Snowball stemmer
@@ -192,7 +225,7 @@ public class DocAnalyzer {
 		// remove all non-word characters
 		// please change this to removing all English punctuation
 		//token = token.replaceAll("\\W+", "");
-    token = token.replaceAll("\\p{Punct}", "");
+	  token = token.replaceAll("\\p{Punct}", "");
 
 		// convert to lower case
 		token = token.toLowerCase();
@@ -200,7 +233,7 @@ public class DocAnalyzer {
 		// add a line to recognize integers and doubles via regular expression
 		// and convert the recognized integers and doubles to a special symbol "NUM"
 
-		if (token.matches(".*\\d.*")) {
+		if (token.matches("\\d+(?:\\.\\d+)?")) {
 		  token = "NUM";
 		}
 
@@ -218,17 +251,81 @@ public class DocAnalyzer {
 		}
 	}
 
+
+  public void TokenizerDemon2(String text) {
+    System.out.format("\n----------------\n");
+    /**
+     * HINT: perform necessary text processing here based on the tokenization
+     * results e.g., tokens -> normalization -> stemming -> N-gram -> stopword
+     * removal -> to vector The Post class has defined a
+     * "HashMap<String, Token> m_vector" field to hold the vector representation
+     * For efficiency purpose, you can accumulate a term's DF here as well
+     */
+    List<String> n_history = new LinkedList<String>();
+    for (int i = 0; i < m_N - 1; i++) {
+      n_history.add("");
+    }
+    for (String token : m_tokenizer.tokenize(text)) {
+      String s = SnowballStemming(Normalization(token));
+      String n_gram = "";
+
+      if (m_stopwords.contains(s)) {
+        s = "";
+      }
+
+      // N-gram construction and stopwords removing
+      if (!s.isEmpty()) {
+        boolean skip = false;
+        for (int i = 0; i < n_history.size(); i++) {
+          if (n_history.get(i).isEmpty()) {
+            n_gram = "";
+            skip = true;
+            break;
+          }
+          n_gram += n_history.get(i) + "_";
+        }
+        if (!skip) n_gram += s;
+      }
+
+      System.out.format("%s\t\t\t%s\n", token, n_gram);
+      n_history.add(s);
+      n_history.remove(0);
+    }
+  }
+
+	public void Zipf() {
+	  try {
+	    Writer writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream("zipf-ttf.txt"), "utf-8"));
+	    for (Token t: m_stats.values()) {
+	      writer.write(t.getToken() + " " + t.getValue() + "\n");
+	    }
+	    writer.close();
+	  }
+	  catch (IOException e) {
+	    e.printStackTrace();
+	  }
+	}
+
+
 	public static void main(String[] args) throws InvalidFormatException, FileNotFoundException, IOException {
+	  // create a unigram model for demonstrating Zipf's law
 		DocAnalyzer analyzer = new DocAnalyzer("./data/Model/en-token.bin", 2);
 
-		//code for demonstrating tokenization and stemming
-		analyzer.TokenizerDemon("I've practiced for 30 years in pediatrics, and I've never seen anything quite like this.");
+		// code for demonstrating tokenization and stemming
+		analyzer.TokenizerDemon("I've practiced for 30 years in pediatrics, and I've never seen anything quite like this. A0a, A.a, A#a, 000, 0.12, A'a");
+    analyzer.TokenizerDemon2("I've practiced for 30 years in pediatrics, and I've never seen anything quite like this. A0a, A.a, A#a, 000, 0.12, A'a");
 
-		//load stopwords
+		// load stopwords
 		analyzer.LoadStopwords("./data/english.stop.txt");
 
-		//entry point to deal with a collection of documents
+		// entry point to deal with a collection of documents
 		analyzer.LoadDirectory("./data/yelp/train", ".json");
+		System.out.println("Total words: " + analyzer.m_stats.size());
+    analyzer.LoadDirectory("./data/yelp/test", ".json");
+    System.out.println("Total words: " + analyzer.m_stats.size());
+
+		// output ttf to zipf-ttf.txt
+		analyzer.Zipf();
 	}
 
 }
