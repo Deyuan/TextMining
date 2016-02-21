@@ -14,6 +14,8 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -50,6 +52,8 @@ public class DocAnalyzer {
 
 	//you might need something like this to store the counting statistics for validating Zipf's and computing IDF
 	HashMap<String, Token> m_stats;
+	HashMap<String, Token> m_ttf;
+	HashMap<String, Token> m_df;
 
 	//we have also provided a sample implementation of language model in src.structures.LanguageModel
 	Tokenizer m_tokenizer;
@@ -62,6 +66,8 @@ public class DocAnalyzer {
 		m_stopwords = new HashSet<String>();
 		m_reviews = new ArrayList<Post>();
 		m_stats = new HashMap<String, Token>();
+		m_ttf = new HashMap<String, Token>();
+		m_df = new HashMap<String, Token>();
 		m_tokenizer = new TokenizerME(new TokenizerModel(new FileInputStream(tokenModel)));
 	}
 
@@ -106,6 +112,8 @@ public class DocAnalyzer {
 		    for (int j = 0; j < m_N - 1; j++) {
 		      n_history.add("");
 		    }
+		    // For calculate DF
+        HashSet<String> token_set = new HashSet<String>();
 		    for (String token : tokens) {
 		      // Normalization and Stemming
 		      String s = SnowballStemming(Normalization(token));
@@ -128,6 +136,7 @@ public class DocAnalyzer {
 
 		      // Statistics
 		      if (!n_gram.isEmpty()) {
+		        // Record token in m_stats
             if (m_stats.containsKey(n_gram)) {
               m_stats.get(n_gram).setValue(m_stats.get(n_gram).getValue() + 1);
             } else {
@@ -135,11 +144,31 @@ public class DocAnalyzer {
               t.setValue(1);
               m_stats.put(n_gram, t);
             }
+            // TTF
+            if (m_ttf.containsKey(n_gram)) {
+              m_ttf.get(n_gram).setValue(m_ttf.get(n_gram).getValue() + 1);
+            } else {
+              Token t = new Token(n_gram);
+              t.setValue(1);
+              m_ttf.put(n_gram, t);
+            }
+            // DF
+            token_set.add(n_gram);
           }
 		      n_history.add(s);
 		      n_history.remove(0);
 		    }
 
+		    // DF
+		    for (String token : token_set) {
+		      if (m_df.containsKey(token)) {
+            m_df.get(token).setValue(m_df.get(token).getValue() + 1);
+		      } else {
+            Token t = new Token(token);
+            t.setValue(1);
+            m_df.put(token, t);
+		      }
+		    }
 				m_reviews.add(review);
 			}
 		} catch (JSONException e) {
@@ -296,7 +325,7 @@ public class DocAnalyzer {
 	public void Zipf() {
 	  try {
 	    Writer writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream("zipf-ttf.txt"), "utf-8"));
-	    for (Token t: m_stats.values()) {
+	    for (Token t: m_ttf.values()) {
 	      writer.write(t.getToken() + " " + t.getValue() + "\n");
 	    }
 	    writer.close();
@@ -306,14 +335,38 @@ public class DocAnalyzer {
 	  }
 	}
 
+	public static Comparator<Token> TokenComparator = new Comparator<Token>() {
+	  @Override
+    public int compare(Token t1, Token t2) {
+	    return Double.compare(t2.getValue(), t1.getValue());
+	  }
+	};
+
+	public List<Token> get_sorted_ttf() {
+	  List<Token> ttf_list = new ArrayList<Token>();
+	  for (Token t: m_ttf.values()) {
+	    ttf_list.add(t);
+	  }
+	  Collections.sort(ttf_list, TokenComparator);
+	  return ttf_list;
+	}
+
+  public List<Token> get_sorted_df() {
+    List<Token> df_list = new ArrayList<Token>();
+    for (Token t: m_df.values()) {
+      df_list.add(t);
+    }
+    Collections.sort(df_list, TokenComparator);
+    return df_list;
+  }
 
 	public static void main(String[] args) throws InvalidFormatException, FileNotFoundException, IOException {
 	  // create a unigram model for demonstrating Zipf's law
-		DocAnalyzer analyzer = new DocAnalyzer("./data/Model/en-token.bin", 2);
+		DocAnalyzer analyzer = new DocAnalyzer("./data/Model/en-token.bin", 1);
 
 		// code for demonstrating tokenization and stemming
-		analyzer.TokenizerDemon("I've practiced for 30 years in pediatrics, and I've never seen anything quite like this. A0a, A.a, A#a, 000, 0.12, A'a");
-    analyzer.TokenizerDemon2("I've practiced for 30 years in pediatrics, and I've never seen anything quite like this. A0a, A.a, A#a, 000, 0.12, A'a");
+		//analyzer.TokenizerDemon("I've practiced for 30 years in pediatrics, and I've never seen anything quite like this. A0a, A.a, A#a, 000, 0.12, A'a");
+    //analyzer.TokenizerDemon2("I've practiced for 30 years in pediatrics, and I've never seen anything quite like this. A0a, A.a, A#a, 000, 0.12, A'a");
 
 		// load stopwords
 		analyzer.LoadStopwords("./data/english.stop.txt");
@@ -321,11 +374,109 @@ public class DocAnalyzer {
 		// entry point to deal with a collection of documents
 		analyzer.LoadDirectory("./data/yelp/train", ".json");
 		System.out.println("Total words: " + analyzer.m_stats.size());
-    analyzer.LoadDirectory("./data/yelp/test", ".json");
-    System.out.println("Total words: " + analyzer.m_stats.size());
+    //analyzer.LoadDirectory("./data/yelp/test", ".json");
+    //System.out.println("Total words: " + analyzer.m_stats.size());
 
 		// output ttf to zipf-ttf.txt
-		analyzer.Zipf();
+		//analyzer.Zipf();
+
+		List<Token> ttf_list = analyzer.get_sorted_ttf();
+		System.out.println("Top 50 TTF: ");
+		for (int i = 0; i < 50; i++) {
+		  Token t = ttf_list.get(i);
+		  System.out.print(t.getToken() + "(" + t.getValue() + "), ");
+		}
+		System.out.println();
+
+		List<Token> df_list = analyzer.get_sorted_df();
+		System.out.println("Top 50 DF: ");
+		for (int i = 0; i < 50; i++) {
+		  Token t = df_list.get(i);
+		  System.out.print(t.getToken() + "(" + t.getValue() + "), ");
+		}
+		System.out.println();
+
+    // create a bigram model
+    DocAnalyzer analyzer2 = new DocAnalyzer("./data/Model/en-token.bin", 2);
+    analyzer2.LoadStopwords("./data/english.stop.txt");
+    analyzer2.LoadDirectory("./data/yelp/train", ".json");
+    System.out.println("Total words: " + analyzer2.m_stats.size());
+
+    List<Token> ttf_list2 = analyzer2.get_sorted_ttf();
+    System.out.println("Top 50 TTF: ");
+    for (int i = 0; i < 50; i++) {
+      Token t = ttf_list2.get(i);
+      System.out.print(t.getToken() + "(" + t.getValue() + "), ");
+    }
+    System.out.println();
+
+    List<Token> df_list2 = analyzer2.get_sorted_df();
+    System.out.println("Top 50 DF: ");
+    for (int i = 0; i < 50; i++) {
+      Token t = df_list2.get(i);
+      System.out.print(t.getToken() + "(" + t.getValue() + "), ");
+    }
+    System.out.println();
+
+
+    // Merge unigram and bigram
+    List<Token> merge_voc = new ArrayList<Token>();
+    for (Token t : df_list) {
+      if (t.getValue() >= 50) {
+        merge_voc.add(t);
+      }
+    }
+    for (Token t : df_list2) {
+      if (t.getValue() >= 50) {
+        merge_voc.add(t);
+      }
+    }
+    Collections.sort(merge_voc, TokenComparator);
+    System.out.println("Vocabulary size after merging: " + merge_voc.size());
+
+    System.out.println("Top 100 DF (new stopwords): ");
+    for (int i = 0; i < 100; i++) {
+      Token t = merge_voc.get(i);
+      System.out.print(t.getToken() + "(" + t.getValue() + "), ");
+    }
+    System.out.println();
+    System.out.println("--------");
+    for (int i = 0; i < 100; i++) {
+      Token t = merge_voc.get(i);
+      System.out.println(t.getToken());
+    }
+    System.out.println("--------");
+
+    // Get controlled vocabulary
+    if (merge_voc.size() < 100) return;
+    List<Token> ctrl_voc = new ArrayList<Token>();
+    for (int i = 100; i < merge_voc.size(); i++) {
+      ctrl_voc.add(merge_voc.get(i));
+    }
+    System.out.println("Controlled Vocabulary size: " + ctrl_voc.size());
+
+    int n_doc = analyzer2.m_reviews.size();
+    System.out.println("Top 50 CV: ");
+    for (int i = 0; i < 50; i++) {
+      Token t = ctrl_voc.get(i);
+      double df = t.getValue();
+      double idf = 1 + Math.log10(n_doc / df);
+      System.out.format("%s (DF=%.0f, IDF=%.2f)\n", t.getToken(), df, idf);
+    }
+    System.out.println();
+
+    System.out.println("Bottom 50 CV: ");
+    for (int i = ctrl_voc.size() - 50; i < ctrl_voc.size(); i++) {
+      Token t = ctrl_voc.get(i);
+      double df = t.getValue();
+      double idf = 1 + Math.log10(n_doc / df);
+      System.out.format("%s (DF=%.0f, IDF=%.2f)\n", t.getToken(), df, idf);
+    }
+    System.out.println();
+
+    // Here we get the controlled vocabulary ctrl_voc.
+
+
 	}
 
 }
