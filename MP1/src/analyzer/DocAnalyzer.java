@@ -54,6 +54,7 @@ public class DocAnalyzer {
 	HashMap<String, Token> m_stats;
 	HashMap<String, Token> m_ttf;
 	HashMap<String, Token> m_df;
+	HashMap<String, Token> m_cv;
 
 	//we have also provided a sample implementation of language model in src.structures.LanguageModel
 	Tokenizer m_tokenizer;
@@ -68,6 +69,7 @@ public class DocAnalyzer {
 		m_stats = new HashMap<String, Token>();
 		m_ttf = new HashMap<String, Token>();
 		m_df = new HashMap<String, Token>();
+		m_cv = new HashMap<String, Token>();
 		m_tokenizer = new TokenizerME(new TokenizerModel(new FileInputStream(tokenModel)));
 	}
 
@@ -100,6 +102,9 @@ public class DocAnalyzer {
 
 				String[] tokens = Tokenize(review.getContent());
 				review.setTokens(tokens);
+
+				// For MP1 part3 calculate cosine similarity
+				HashMap<String, Token> vec_tf = new HashMap<String, Token>();
 
 				/**
 				 * HINT: perform necessary text processing here based on the tokenization results
@@ -157,7 +162,32 @@ public class DocAnalyzer {
           }
 		      n_history.add(s);
 		      n_history.remove(0);
-		    }
+
+
+		      // For cosine similarity: Here, s is unigram, n_gram is bigram.
+		      // vec_tf: term frequency inside a review doc
+		      if (m_cv.size() > 0) {
+		        if (m_cv.containsKey(s)) {
+		          if (vec_tf.containsKey(s)) {
+		            vec_tf.get(s).setValue(vec_tf.get(s).getValue() + 1);
+		          } else {
+		            Token t = new Token(s);
+		            t.setValue(1);
+		            vec_tf.put(s, t);
+		          }
+		        }
+		        if (m_cv.containsKey(n_gram)) {
+              if (vec_tf.containsKey(n_gram)) {
+                vec_tf.get(n_gram).setValue(vec_tf.get(n_gram).getValue() + 1);
+              } else {
+                Token t = new Token(n_gram);
+                t.setValue(1);
+                vec_tf.put(n_gram, t);
+              }
+		        }
+		      } // For cosine similarity
+
+		    } // loop over tokens in a post
 
 		    // DF
 		    for (String token : token_set) {
@@ -169,8 +199,34 @@ public class DocAnalyzer {
             m_df.put(token, t);
 		      }
 		    }
+
+		    // Build vec for each review document
+		    if (m_cv.size() > 0) {
+		      HashMap<String, Token> vec = new HashMap<String, Token>();
+
+		      // Calculate weight: TF-IDF
+		      for (Token t: vec_tf.values()) {
+
+		        double tf = t.getValue();  // tf count, only appear when > 0
+		        double idf = m_cv.get(t.getToken()).getValue(); // all train doc
+
+		        // sublinear tf scaling
+		        double tf_scale = 1 + Math.log10(tf);
+		        double tf_idf = tf_scale * idf;
+
+		        t.setValue(tf_idf);
+
+		      }
+		      review.setVct(vec_tf);
+
+		    }
+
 				m_reviews.add(review);
-			}
+				//System.out.println(review.getAuthor());
+        //System.out.println(review.getContent());
+        //System.out.println(review.getDate());
+
+			} // loop over posts
 		} catch (JSONException e) {
 			e.printStackTrace();
 		}
@@ -361,6 +417,9 @@ public class DocAnalyzer {
   }
 
 	public static void main(String[] args) throws InvalidFormatException, FileNotFoundException, IOException {
+	  String train_folder = "./data/yelp/train";
+
+	  System.out.println("===============================================");
 	  // create a unigram model for demonstrating Zipf's law
 		DocAnalyzer analyzer = new DocAnalyzer("./data/Model/en-token.bin", 1);
 
@@ -372,7 +431,7 @@ public class DocAnalyzer {
 		analyzer.LoadStopwords("./data/english.stop.txt");
 
 		// entry point to deal with a collection of documents
-		analyzer.LoadDirectory("./data/yelp/train", ".json");
+		analyzer.LoadDirectory(train_folder, ".json");
 		System.out.println("Total words: " + analyzer.m_stats.size());
     //analyzer.LoadDirectory("./data/yelp/test", ".json");
     //System.out.println("Total words: " + analyzer.m_stats.size());
@@ -396,10 +455,11 @@ public class DocAnalyzer {
 		}
 		System.out.println();
 
+    System.out.println("===============================================");
     // create a bigram model
     DocAnalyzer analyzer2 = new DocAnalyzer("./data/Model/en-token.bin", 2);
     analyzer2.LoadStopwords("./data/english.stop.txt");
-    analyzer2.LoadDirectory("./data/yelp/train", ".json");
+    analyzer2.LoadDirectory(train_folder, ".json");
     System.out.println("Total words: " + analyzer2.m_stats.size());
 
     List<Token> ttf_list2 = analyzer2.get_sorted_ttf();
@@ -474,7 +534,88 @@ public class DocAnalyzer {
     }
     System.out.println();
 
+    System.out.println("===============================================");
+   // ***********************************************************
     // Here we get the controlled vocabulary ctrl_voc.
+    // Generate hashmap cv, containing token and idf.
+    HashMap<String, Token> cv = new HashMap<String, Token>();
+    for (Token t : ctrl_voc) {
+      Token tt = new Token(t.getToken());
+      tt.setValue(1 + Math.log10(t.getValue()));
+      cv.put(tt.getToken(), tt);
+    }
+
+    DocAnalyzer analyzer3 = new DocAnalyzer("./data/Model/en-token.bin", 2);
+    analyzer3.LoadStopwords("./data/english.stop.txt");
+    //analyzer3.LoadStopwords("./data/yelp.stop.txt"); // already stemmed
+    for (int i = 0; i < 100; i++) {
+      analyzer3.m_stopwords.add(merge_voc.get(i).getToken());
+    }
+    System.out.println("# Stopwords: " + analyzer3.m_stopwords.size());
+
+    analyzer3.m_cv = cv;
+    analyzer3.LoadDirectory(train_folder, ".json");
+    System.out.println("Total words: " + analyzer3.m_stats.size());
+
+    System.out.println("Total # of train reviews: " + analyzer3.m_reviews.size());
+    //for (Post p : analyzer3.m_reviews) {
+    //  System.out.println("VEC size: " + p.getVct().size() + " ((" + p.getContent());
+    //}
+    System.out.println("===============================================");
+
+    DocAnalyzer analyzer4 = new DocAnalyzer("./data/Model/en-token.bin", 2);
+    analyzer4.LoadStopwords("./data/english.stop.txt");
+    for (int i = 0; i < 100; i++) {
+      analyzer4.m_stopwords.add(merge_voc.get(i).getToken());
+    }
+    analyzer4.m_cv = cv; // with train IDF
+    analyzer4.LoadDirectory("./data/yelp/test", ".json");
+    System.out.println("Total # of test reviews: " + analyzer4.m_reviews.size());
+
+    System.out.println("===============================================");
+    DocAnalyzer analyzer5 = new DocAnalyzer("./data/Model/en-token.bin", 2);
+    analyzer5.LoadStopwords("./data/english.stop.txt");
+    for (int i = 0; i < 100; i++) {
+      analyzer5.m_stopwords.add(merge_voc.get(i).getToken());
+    }
+    analyzer5.m_cv = cv; // with train IDF
+    analyzer5.LoadDirectory("./data/query", ".json");
+    System.out.println("Total # of query reviews: " + analyzer5.m_reviews.size());
+    for (Post p : analyzer5.m_reviews) {
+
+      System.out.println("QUERY: " + p.getAuthor() + " " + p.getDate() + " " + p.getContent());
+      Post[] top3_post = new Post[3];
+      double[] top3_cos = new double[3];
+      for (int i = 0; i < 3; i++) {
+        top3_post[i] = null;
+        top3_cos[i] = 0;
+      }
+      for (Post q : analyzer4.m_reviews) {
+        double cos_sim = p.similiarity(q);
+        if (cos_sim > top3_cos[0]) {
+          top3_post[2] = top3_post[1];
+          top3_cos[2] = top3_cos[1];
+          top3_post[1] = top3_post[0];
+          top3_cos[1] = top3_cos[0];
+          top3_post[0] = q;
+          top3_cos[0] = cos_sim;
+        } else if (cos_sim > top3_cos[1]) {
+          top3_post[2] = top3_post[1];
+          top3_cos[2] = top3_cos[1];
+          top3_post[1] = q;
+          top3_cos[1] = cos_sim;
+        } else if (cos_sim > top3_cos[2]) {
+          top3_post[2] = q;
+          top3_cos[2] = cos_sim;
+        }
+      }
+
+      for (int i = 0; i < 3; i++) {
+        System.out.println("TOP " + (i + 1) + ": cosine similarity = " + top3_cos[i]);
+        System.out.println(top3_post[i].getAuthor() + " " + top3_post[i].getDate() + " " + top3_post[i].getContent());
+      }
+    }
+
 
 
 	}
